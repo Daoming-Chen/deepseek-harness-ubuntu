@@ -1,5 +1,16 @@
 name: Ubuntu desktop release
 on:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+      source_commit:
+        type: string
+        default: ''
+      source_version:
+        type: string
+        default: ''
   push:
     branches: [main]
   workflow_dispatch:
@@ -32,6 +43,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential python3 python3-yaml libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libnotify4 libsecret-1-0 libxtst6 libxss1 zenity xvfb
           corepack enable
+      - name: Select an official source candidate when called by upstream synchronization
+        env:
+          CANDIDATE_SOURCE_COMMIT: ${{ inputs.source_commit }}
+          CANDIDATE_SOURCE_VERSION: ${{ inputs.source_version }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, pathlib, re
+          commit = os.environ.get('CANDIDATE_SOURCE_COMMIT', '')
+          version = os.environ.get('CANDIDATE_SOURCE_VERSION', '')
+          if commit or version:
+              if not re.fullmatch(r'[a-f0-9]{40}', commit) or not re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', version):
+                  raise SystemExit('Invalid official source candidate')
+              path = pathlib.Path('upstream.json')
+              current = json.loads(path.read_text())
+              current.update(commit=commit, productVersion=version)
+              path.write_text(json.dumps(current, indent=2) + '\n')
+          PYTHON
       - name: Select an increasing build version and update URL
         run: |
           product=$(python3 -c 'import json; print(json.load(open("upstream.json"))["productVersion"])')

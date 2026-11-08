@@ -16,6 +16,13 @@ git -C "$source_dir" checkout --detach FETCH_HEAD
 git -C "$source_dir" apply --check "$release_root/patches/ubuntu-desktop.patch"
 git -C "$source_dir" apply "$release_root/patches/ubuntu-desktop.patch"
 cd "$source_dir"
+python3 - "$release_root/upstream.json" <<'PYTHON'
+import json,sys
+expected=json.load(open(sys.argv[1]))['productVersion']
+actual=json.load(open('package.json'))['version']
+if actual != expected:
+    raise SystemExit('Pinned official commit and product version disagree')
+PYTHON
 corepack pnpm install --frozen-lockfile --store-dir "$release_root/work/pnpm-store"
 DSH_GATE_CONCURRENCY=${DSH_GATE_CONCURRENCY:-2} \
 DSH_DESKTOP_LINUX_UPDATE_URL="$update_url" \

@@ -848,14 +848,18 @@ index 5d16769a..1fa9a55c 100644
  console.log('desktop-node-script-ok')
 diff --git a/apps/desktop/tests/linux-packaging.spec.ts b/apps/desktop/tests/linux-packaging.spec.ts
 new file mode 100644
-index 00000000..5b2c2b96
+index 00000000..02a74f40
 --- /dev/null
 +++ b/apps/desktop/tests/linux-packaging.spec.ts
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,44 @@
 +/** Ubuntu local packaging stays independent from the upstream signed update channel. */
-+import { expect, it } from 'vitest'
++import { afterEach, expect, it, vi } from 'vitest'
++
++afterEach(() => { vi.unstubAllEnvs(); vi.resetModules() })
 +
 +it('packages an Ubuntu desktop entry without official update or mandatory policy configuration', async () => {
++  vi.stubEnv('DSH_DESKTOP_LINUX_UPDATE_URL', undefined)
++  vi.resetModules()
 +  const { default: config } = await import('../electron-builder.linux.config.mjs')
 +  expect(config.publish).toBeNull()
 +  expect(config.extraMetadata.dshMandatoryUpdatePolicy).toBeUndefined()
@@ -882,6 +886,15 @@ index 00000000..5b2c2b96
 +  expect(linuxUpdatePublish({ DSH_DESKTOP_LINUX_UPDATE_URL: 'http://127.0.0.1:3456', DSH_DESKTOP_LINUX_UPDATE_TEST: '1' })?.url)
 +    .toBe('http://127.0.0.1:3456/')
 +  expect(() => linuxUpdatePublish({ DSH_DESKTOP_LINUX_UPDATE_URL: 'http://example.com', DSH_DESKTOP_LINUX_UPDATE_TEST: '1' })).toThrow()
++})
++
++
++it('embeds the configured Ubuntu feed without requiring official signing or release credentials', async () => {
++  vi.stubEnv('DSH_DESKTOP_LINUX_UPDATE_URL', 'https://example.com/ubuntu/')
++  vi.resetModules()
++  const { default: config } = await import('../electron-builder.linux.config.mjs')
++  expect(config.publish).toEqual([{ provider: 'generic', url: 'https://example.com/ubuntu/', channel: 'stable', useMultipleRangeRequest: false }])
++  expect(config.extraMetadata.dshMandatoryUpdatePolicy).toBeUndefined()
 +})
 diff --git a/package.json b/package.json
 index c4f13094..40985015 100644

@@ -1,0 +1,81 @@
+name: Follow official DeepSeek releases
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - sync-upstream.mjs
+      - sync-upstream.test.mjs
+      - package.json
+      - package-lock.json
+      - .github/workflows/sync-upstream.yml
+permissions:
+  contents: read
+concurrency:
+  group: ubuntu-official-release-sync
+  cancel-in-progress: false
+jobs:
+  detect:
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.candidate.outputs.changed }}
+      commit: ${{ steps.candidate.outputs.commit }}
+      version: ${{ steps.candidate.outputs.version }}
+      tag: ${{ steps.candidate.outputs.tag }}
+      previous_commit: ${{ steps.candidate.outputs.previous_commit }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: Detect a newer official RC or stable release
+        id: candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run check-upstream
+  release:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      publish: true
+      source_commit: ${{ needs.detect.outputs.commit }}
+      source_version: ${{ needs.detect.outputs.version }}
+  record:
+    needs: [detect, release]
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+      - name: Record only a successfully published official source
+        env:
+          PREVIOUS_COMMIT: ${{ needs.detect.outputs.previous_commit }}
+          OFFICIAL_COMMIT: ${{ needs.detect.outputs.commit }}
+          OFFICIAL_VERSION: ${{ needs.detect.outputs.version }}
+          OFFICIAL_TAG: ${{ needs.detect.outputs.tag }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, pathlib
+          path = pathlib.Path('upstream.json')
+          current = json.loads(path.read_text())
+          if current['commit'] != os.environ['PREVIOUS_COMMIT']:
+              raise SystemExit('The source pin changed during the build; refusing to overwrite it')
+          current.update(commit=os.environ['OFFICIAL_COMMIT'], productVersion=os.environ['OFFICIAL_VERSION'], releaseTag=os.environ['OFFICIAL_TAG'])
+          path.write_text(json.dumps(current, indent=2) + '\n')
+          PYTHON
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add upstream.json
+          git commit -m "Follow official $OFFICIAL_TAG after verified Ubuntu release [skip ci]"
+          git push origin HEAD:main
