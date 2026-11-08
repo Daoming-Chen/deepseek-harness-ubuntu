@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "check-upstream": "node sync-upstream.mjs",
-    "test": "node --test sync-upstream.test.mjs"
+    "test": "node --test sync-upstream.test.mjs release-policy.test.mjs"
   },
   "dependencies": {
     "semver": "7.8.5"

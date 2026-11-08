@@ -69,7 +69,7 @@ export function shouldHoldFailedCandidate(candidate, state, inputsHash, forceRet
 
 async function buildInputsHash() {
   const hash = createHash('sha256')
-  for (const path of ['patches/ubuntu-desktop.patch', 'build.sh', 'verify-release.py', '.github/workflows/release.yml', 'sync-upstream.mjs']) {
+  for (const path of ['patches/ubuntu-desktop.patch', 'build.sh', 'verify-release.py', '.github/workflows/release.yml', 'release-policy.mjs', 'release-policy.test.mjs', 'package.json', 'package-lock.json', 'sync-upstream.mjs']) {
     hash.update(path).update(await readFile(new URL(path, import.meta.url)))
   }
   return hash.digest('hex')

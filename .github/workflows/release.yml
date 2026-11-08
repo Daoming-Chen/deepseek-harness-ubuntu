@@ -38,6 +38,10 @@ jobs:
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: '24'
+      - name: Install publication policy dependencies and test release rules
+        run: |
+          npm ci --ignore-scripts
+          npm test
       - name: Install build and desktop dependencies
         run: |
           sudo apt-get update
@@ -62,14 +66,7 @@ jobs:
           PYTHON
       - name: Select an increasing build version and update URL
         run: |
-          product=$(python3 -c 'import json; print(json.load(open("upstream.json"))["productVersion"])')
-          day=$(date -u +%Y%m%d)
-          sequence=$((GITHUB_RUN_NUMBER + 1))
-          case "$product" in
-            *-*) version="$product.$day.$sequence" ;;
-            *) version="$product-test.$day.$sequence" ;;
-          esac
-          echo "DSH_DESKTOP_BUILD_VERSION=$version" >> "$GITHUB_ENV"
+          node release-policy.mjs version
           echo "DSH_DESKTOP_LINUX_UPDATE_URL=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/" >> "$GITHUB_ENV"
       - name: Build and verify the independent Ubuntu package
         run: ./build.sh
@@ -94,6 +91,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          node release-policy.mjs check
           gh release create "ubuntu-v$DSH_DESKTOP_BUILD_VERSION" \
             --title "Ubuntu desktop $DSH_DESKTOP_BUILD_VERSION" \
             --notes-file release-notes.md \
