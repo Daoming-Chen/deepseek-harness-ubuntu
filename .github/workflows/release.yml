@@ -1,0 +1,73 @@
+name: Ubuntu desktop release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified package as the current update
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ubuntu-desktop-release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      DSH_GATE_CONCURRENCY: '1'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+      - name: Install build and desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3 python3-yaml libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libnotify4 libsecret-1-0 libxtst6 libxss1 zenity xvfb
+          corepack enable
+      - name: Select an increasing build version and update URL
+        run: |
+          product=$(python3 -c 'import json; print(json.load(open("upstream.json"))["productVersion"])')
+          day=$(date -u +%Y%m%d)
+          sequence=$((GITHUB_RUN_NUMBER + 1))
+          case "$product" in
+            *-*) version="$product.$day.$sequence" ;;
+            *) version="$product-test.$day.$sequence" ;;
+          esac
+          echo "DSH_DESKTOP_BUILD_VERSION=$version" >> "$GITHUB_ENV"
+          echo "DSH_DESKTOP_LINUX_UPDATE_URL=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/" >> "$GITHUB_ENV"
+      - name: Build and verify the independent Ubuntu package
+        run: ./build.sh
+      - name: Qualify the real updater with an application-specific sandbox profile
+        run: |
+          source_dir=$(cat dist/source-directory.txt)
+          electron_path="$source_dir/apps/desktop/.desktop-build/targets/linux-x64/electron/electron"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile dsh-ubuntu-ci "%s" flags=(unconfined) {\n  userns,\n}\n' "$electron_path" | sudo tee /etc/apparmor.d/dsh-ubuntu-ci >/dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/dsh-ubuntu-ci
+          cd "$source_dir"
+          xvfb-run -a corepack pnpm run test:updates:linux
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ubuntu-desktop-${{ env.DSH_DESKTOP_BUILD_VERSION }}
+          path: |
+            dist/*.deb
+            dist/*-linux.yml
+            dist/SHA256SUMS
+            dist/upstream.json
+      - name: Publish the explicit stable-channel release
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "ubuntu-v$DSH_DESKTOP_BUILD_VERSION" \
+            --title "Ubuntu desktop $DSH_DESKTOP_BUILD_VERSION" \
+            --notes-file release-notes.md \
+            --latest \
+            dist/*.deb dist/*-linux.yml dist/SHA256SUMS dist/upstream.json
