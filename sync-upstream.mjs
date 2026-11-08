@@ -1,5 +1,6 @@
 /** Follow published official RC and stable releases after validating their source identity. */
 import { appendFile, readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import semver from 'semver'
@@ -58,17 +59,38 @@ export async function detectUpstreamRelease(current, request = api) {
   return { commit, productVersion: release.version, releaseTag: release.tag_name }
 }
 
+/** Hold a failed candidate until its inputs change or a maintainer explicitly retries it. */
+export function shouldHoldFailedCandidate(candidate, state, inputsHash, forceRetry = false) {
+  const failed = state?.failedCandidate
+  if (failed == null || forceRetry) return false
+  if (!shaPattern.test(failed.commit) || !/^[a-f0-9]{64}$/u.test(failed.buildInputsHash)) throw new Error('Invalid failed-candidate state')
+  return failed.commit === candidate.commit && failed.buildInputsHash === inputsHash
+}
+
+async function buildInputsHash() {
+  const hash = createHash('sha256')
+  for (const path of ['patches/ubuntu-desktop.patch', 'build.sh', 'verify-release.py', '.github/workflows/release.yml', 'sync-upstream.mjs']) {
+    hash.update(path).update(await readFile(new URL(path, import.meta.url)))
+  }
+  return hash.digest('hex')
+}
+
 async function main() {
   const current = JSON.parse(await readFile(new URL('./upstream.json', import.meta.url), 'utf8'))
   const candidate = await detectUpstreamRelease(current)
-  const outputs = candidate === null ? { changed: 'false' } : {
+  const inputsHash = await buildInputsHash()
+  let state = {}
+  try { state = JSON.parse(await readFile(new URL('./sync-state.json', import.meta.url), 'utf8')) }
+  catch (error) { if (error.code !== 'ENOENT') throw error }
+  const held = candidate !== null && shouldHoldFailedCandidate(candidate, state, inputsHash, process.env.RETRY_FAILED_RELEASE === 'true')
+  const outputs = candidate === null || held ? { changed: 'false' } : {
     changed: 'true', commit: candidate.commit, version: candidate.productVersion,
-    tag: candidate.releaseTag, previous_commit: current.commit,
+    tag: candidate.releaseTag, previous_commit: current.commit, build_inputs_hash: inputsHash,
   }
   if (process.env.GITHUB_OUTPUT) {
     await appendFile(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''))
   }
-  console.log(candidate === null ? 'No newer official RC or stable release; keeping the current Ubuntu release' : JSON.stringify(candidate))
+  console.log(held ? 'Keeping the previous Ubuntu release; this candidate needs a compatibility fix or an explicit retry' : candidate === null ? 'No newer official RC or stable release; keeping the current Ubuntu release' : JSON.stringify(candidate))
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

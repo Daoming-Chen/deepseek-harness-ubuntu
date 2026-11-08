@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: '23 * * * *'
   workflow_dispatch:
+    inputs:
+      retry_failed:
+        description: Retry a previously failed official release candidate
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -18,6 +23,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   detect:
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     outputs:
       changed: ${{ steps.candidate.outputs.changed }}
@@ -25,6 +32,7 @@ jobs:
       version: ${{ steps.candidate.outputs.version }}
       tag: ${{ steps.candidate.outputs.tag }}
       previous_commit: ${{ steps.candidate.outputs.previous_commit }}
+      build_inputs_hash: ${{ steps.candidate.outputs.build_inputs_hash }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -37,7 +45,24 @@ jobs:
         id: candidate
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          RETRY_FAILED_RELEASE: ${{ inputs.retry_failed }}
         run: npm run check-upstream
+      - name: Record a monthly upstream-monitor checkpoint
+        run: |
+          last_commit=$(git log -1 --format=%ct)
+          if (( $(date -u +%s) - last_commit >= 2419200 )); then
+            python3 - <<'PYTHON'
+          import datetime, json, pathlib
+          current = json.loads(pathlib.Path('upstream.json').read_text())
+          state = {'checkedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'pinnedCommit': current['commit'], 'productVersion': current['productVersion'], 'officialReleaseCheck': 'succeeded'}
+          pathlib.Path('upstream-monitor.json').write_text(json.dumps(state, indent=2) + '\n')
+          PYTHON
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add upstream-monitor.json
+            git commit -m 'Record upstream release monitor checkpoint [skip ci]'
+            git push origin HEAD:main
+          fi
   release:
     needs: detect
     if: needs.detect.outputs.changed == 'true'
@@ -72,10 +97,38 @@ jobs:
           if current['commit'] != os.environ['PREVIOUS_COMMIT']:
               raise SystemExit('The source pin changed during the build; refusing to overwrite it')
           current.update(commit=os.environ['OFFICIAL_COMMIT'], productVersion=os.environ['OFFICIAL_VERSION'], releaseTag=os.environ['OFFICIAL_TAG'])
+          pathlib.Path('sync-state.json').write_text(json.dumps({'failedCandidate': None}) + '\n')
           path.write_text(json.dumps(current, indent=2) + '\n')
           PYTHON
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add upstream.json
+          git add upstream.json sync-state.json
           git commit -m "Follow official $OFFICIAL_TAG after verified Ubuntu release [skip ci]"
+          git push origin HEAD:main
+
+  record_failure:
+    needs: [detect, release]
+    if: always() && needs.detect.outputs.changed == 'true' && needs.release.result == 'failure'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+      - name: Hold the failed candidate without changing the online release
+        env:
+          OFFICIAL_COMMIT: ${{ needs.detect.outputs.commit }}
+          OFFICIAL_VERSION: ${{ needs.detect.outputs.version }}
+          BUILD_INPUTS_HASH: ${{ needs.detect.outputs.build_inputs_hash }}
+        run: |
+          python3 - <<'PYTHON'
+          import datetime, json, os, pathlib
+          state = {'failedCandidate': {'commit': os.environ['OFFICIAL_COMMIT'], 'version': os.environ['OFFICIAL_VERSION'], 'buildInputsHash': os.environ['BUILD_INPUTS_HASH'], 'failedAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}}
+          pathlib.Path('sync-state.json').write_text(json.dumps(state, indent=2) + '\n')
+          PYTHON
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sync-state.json
+          git commit -m 'Hold failed upstream candidate pending compatibility review [skip ci]'
           git push origin HEAD:main
