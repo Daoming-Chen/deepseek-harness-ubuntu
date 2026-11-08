@@ -31,6 +31,11 @@ corepack pnpm exec vitest run \
   apps/desktop/tests/desktop-build-paths.spec.ts \
   apps/desktop/tests/cli-launcher.spec.ts \
   apps/desktop/tests/linux-packaging.spec.ts \
+  apps/desktop/tests/preload-menu.client.spec.ts \
+  apps/desktop/tests/update-overlay.spec.ts \
+  apps/desktop/tests/preload-platform.client.spec.ts \
+  apps/desktop/tests/preload-windows.client.spec.ts \
+  apps/desktop/tests/welcome-window.spec.ts \
   apps/desktop/tests/development-project.spec.ts \
   apps/desktop/tests/tray.spec.ts \
   apps/desktop/tests/installer-packaging.spec.ts \
