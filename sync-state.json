@@ -1,8 +1,8 @@
 {
   "failedCandidate": {
-    "commit": "38a6a5c965aa99ab525161efb7cc5cf1fe62fced",
-    "version": "0.2.2-rc.3",
+    "commit": "3f321d32bfe382212a8ed8785c1d47a5a300aa23",
+    "version": "0.2.2-rc.4",
     "buildInputsHash": "21822dbbb0a2f0ad65030d7268150f09d8f61136d905a9a04dedc3d72b25346b",
-    "failedAt": "2026-11-13T09:46:04.409087+00:00"
+    "failedAt": "2026-11-17T23:09:10.438897+00:00"
   }
 }
